@@ -1,0 +1,119 @@
+<!--
+ * @Descripttion: 
+ * @Author: 小余
+ * @Date: 2022-04-28 15:38:03
+ * @LastEditors: voanit
+ * @LastEditTime: 2022-04-28 17:52:32
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+<body>
+  <input type="text" name="" id="" placeholder="请输入发送的内容">
+  <button>发送消息</button>
+  <div></div>
+</body>
+<script>
+  var input = document.querySelector('input');
+  var button = document.querySelector('button');
+  var div = document.querySelector('div');
+
+  var lockReconnect = false;  //避免ws重复连接
+  var wsUrl = "ws://192.168.0.145:3001";
+  var ws = null;
+  createWebSocket(wsUrl);
+  
+  function createWebSocket(url) {
+    try{
+        if('WebSocket' in window){
+            ws = new WebSocket(url);
+        }
+        initEventHandle();
+    }catch(e){
+        reconnect(url);
+        console.log(e);
+    }     
+  }
+ 
+  function initEventHandle() {
+    ws.onclose = function () {
+        reconnect(wsUrl);
+        console.log("客户端连接关闭!"+new Date().toLocaleString());
+    };
+    ws.onerror = function () {
+        reconnect(wsUrl);
+        console.log("客户端连接错误!");
+    };
+
+    // 当一个 WebSocket 连接成功时触发。
+    ws.onopen = ()=> {
+        heartCheck.reset().start();      //心跳检测重置
+        console.log("客户端连接成功!"+new Date().toLocaleString());
+        div.innerHTML = "客户端连接成功!"+new Date().toLocaleString();
+    };
+    
+    // 当通过 WebSocket 收到数据时触发。
+    ws.onmessage = (e)=>{
+      let {type,message} = JSON.parse(e.data)
+      heartCheck.reset().start(); //如果获取到消息，心跳检测重置
+      if(type != "pong"){
+        console.log(JSON.parse(e.data))
+        var dv = document.createElement("div");
+        dv.innerHTML = message;
+        div.appendChild(dv);
+      }else{
+        console.log(message)
+      }
+    }
+  }
+
+  // 监听窗口关闭事件，当窗口关闭时，主动去关闭websocket连接，防止连接还没断开就关闭窗口，server端会抛异常。
+  window.onbeforeunload = function() {
+      ws.close();
+  }  
+  
+  function reconnect(url) {
+    if(lockReconnect) return;
+    lockReconnect = true;
+    setTimeout(function () {     //没连接上会一直重连，设置延迟避免请求过多
+        createWebSocket(url);
+        lockReconnect = false;
+    }, 2000);
+  }
+  
+  //心跳检测
+  var heartCheck = {
+    timeout: 1000,        //1分钟发一次心跳60000
+    timeoutObj: null,
+    serverTimeoutObj: null,
+    reset: function(){
+        clearTimeout(this.timeoutObj);
+        clearTimeout(this.serverTimeoutObj);
+        return this;
+    },
+    start: function(){
+        var self = this;
+        this.timeoutObj = setTimeout(function(){
+            //这里发送一个心跳，后端收到后，返回一个心跳消息，
+            //onmessage拿到返回的心跳就说明连接正常
+            ws.send("ping");
+            self.serverTimeoutObj = setTimeout(function(){//如果超过一定时间还没重置，说明后端主动断开了
+              ws.close();     //如果onclose会执行reconnect，我们执行ws.close()就行了.如果直接执行reconnect 会触发onclose导致重连两次
+            }, self.timeout)
+        }, this.timeout)
+    }
+  }
+
+  button.addEventListener('click',()=>{
+    var value = input.value;
+    ws.send(value);
+    input.value = "";
+  })
+
+</script>
+</html>
